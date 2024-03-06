@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        display: flex;
+        font-family: Arial, sans-serif;
+      }
+
+      canvas {
+        display: block;
+        margin: auto;
+        background-color: #f0f0f0;
+      }
+
+      input {
+        padding: 8px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+      }
+      label {
+        font-size: 14px;
+        color: #000;
+      }
+      button {
+        padding: 8px 16px;
+        border: none;
+        border-radius: 4px;
+        background-color: #f00;
+        color: #fff;
+        cursor: pointer;
+        opacity: 0.8;
+      }
+      button:hover {
+        opacity: 1;
+      }
+
+      .boxInfo {
+        position: absolute;
+        top: 24px;
+        left: 24px;
+      }
+
+      .boxSetting {
+        position: absolute;
+        top: 24px;
+        right: 24px;
+      }
+
+      .timer {
+        font-size: 24px;
+        color: #000;
+      }
+
+      .row {
+        display: flex;
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+      }
+      .center {
+        justify-content: center;
+      }
+      .crossCenter {
+        align-items: center;
+      }
+      .expand {
+        flex: 1;
+      }
+      .gap-12 {
+        gap: 12px;
+      }
+      .gap-4 {
+        gap: 4px;
+      }
+    </style>
+    <title>Simulasi Ketapel - UIN RIL</title>
+  </head>
+  <body>
+    <canvas id="gameCanvas"></canvas>
+    <div class="boxInfo">
+      <div class="timer"></div>
+    </div>
+    <div class="boxSetting col gap-12">
+      <div class="row gap-12">
+        <div class="col gap-4">
+          <label for="gravity">Gravitasi</label>
+          <input type="number" id="gravity" placeholder="Gravity" />
+        </div>
+
+        <div class="col gap-4">
+          <label for="speed">Pengganda Kecepatan</label>
+          <input type="number" id="speed" placeholder="Speed" />
+        </div>
+      </div>
+      <div class="row gap-12">
+        <div class="col gap-4">
+          <label for="projectionGap">Jarak titik proyeksi (detik)</label>
+          <input
+            type="number"
+            id="projectionGap"
+            placeholder="Projection Gap"
+          />
+        </div>
+
+        <div class="col gap-4">
+          <label for="slingshotHeight">Tinggi Ketapel</label>
+          <input
+            type="number"
+            id="slingshotHeight"
+            placeholder="Slingshot Height"
+          />
+        </div>
+      </div>
+
+      <button id="reset">Reset</button>
+    </div>
+
+    <script>
+      const canvas = document.getElementById("gameCanvas");
+      const ctx = canvas.getContext("2d");
+
+      function resizeCanvas() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+      }
+
+      window.addEventListener("resize", resizeCanvas);
+      resizeCanvas();
+
+      // ----------------- GAME CONFIGURATION -----------------
+
+      const config = {
+        gravity: 9.8,
+        speedMultiplier: 1,
+        projection: {
+          color: "red",
+          gap: 0.1,
+        },
+        ball: {
+          radius: 20,
+          color: "#f00",
+          initialPosition: {
+            x: 200,
+            y: canvas.height - 200,
+          },
+        },
+        slingshot: {
+          color: "#666",
+          lineColor: "brown",
+          width: 8,
+          position: {
+            x: 200,
+            y: canvas.height,
+          },
+        },
+      };
+
+      const worldState = {
+        idle: "idle",
+        dragging: "dragging",
+        flying: "flying",
+        grounded: "grounded",
+      };
+
+      const initialState = {
+        world: worldState.idle,
+        ball: config.ball.initialPosition,
+        projection: {
+          x: [],
+          y: [],
+        },
+        projectionHistory: [],
+        angle: 0,
+        fly: {
+          startX: 0,
+          startY: 0,
+          speed: 0,
+          startTime: 0,
+        },
+      };
+
+      let state = JSON.parse(JSON.stringify(initialState));
+
+      // ----------------- UI INTERACTION -----------------
+
+      const gravity = document.querySelector("#gravity");
+      gravity.value = config.gravity;
+      gravity.addEventListener("change", (e) => {
+        config.gravity = Number(e.target.value);
+      });
+
+      const speed = document.querySelector("#speed");
+      speed.value = config.speedMultiplier;
+      speed.addEventListener("change", (e) => {
+        config.speedMultiplier = Number(e.target.value);
+      });
+
+      const projectionGap = document.querySelector("#projectionGap");
+      projectionGap.value = config.projection.gap;
+      projectionGap.addEventListener("change", (e) => {
+        config.projection.gap = Number(e.target.value);
+      });
+
+      const slingshotHeight = document.querySelector("#slingshotHeight");
+      slingshotHeight.value = canvas.height - config.ball.initialPosition.y;
+      slingshotHeight.addEventListener("change", (e) => {
+        config.ball.initialPosition.y = canvas.height - e.target.value;
+        state.ball.y = config.ball.initialPosition.y;
+      });
+
+      const reset = document.querySelector("#reset");
+      reset.addEventListener("click", () => {
+        state = {
+          ...JSON.parse(JSON.stringify(initialState)),
+        };
+      });
+
+      // ----------------- DRAWING FUNCTIONS -----------------
+
+      function drawBall() {
+        ctx.beginPath();
+        ctx.arc(state.ball.x, state.ball.y, config.ball.radius, 0, Math.PI * 2);
+        ctx.fillStyle = config.ball.color;
+        ctx.fill();
+        ctx.closePath();
+      }
+
+      function drawSlingshot() {
+        ctx.beginPath();
+        ctx.moveTo(config.slingshot.position.x, config.slingshot.position.y);
+        ctx.lineTo(
+          config.ball.initialPosition.x,
+          config.ball.initialPosition.y
+        );
+        ctx.strokeStyle = config.slingshot.color;
+        ctx.lineWidth = config.slingshot.width;
+        ctx.stroke();
+        ctx.closePath();
+      }
+
+      function drawSlingshotLine() {
+        ctx.beginPath();
+        ctx.moveTo(
+          config.ball.initialPosition.x,
+          config.ball.initialPosition.y
+        );
+        ctx.lineTo(state.ball.x, state.ball.y);
+        ctx.strokeStyle = config.slingshot.lineColor;
+        ctx.lineWidth = 4;
+        ctx.stroke();
+        ctx.closePath();
+      }
+
+      function drawProjection() {
+        // draw as multiple dots
+        for (let i = 0; i < state.projection.x.length; i++) {
+          ctx.beginPath();
+          ctx.arc(
+            state.projection.x[i],
+            state.projection.y[i],
+            2,
+            0,
+            Math.PI * 2
+          );
+          ctx.fillStyle = config.projection.color;
+          ctx.fill();
+          ctx.closePath();
+        }
+      }
+
+      function drawProjectionHistory() {
+        state.projectionHistory.forEach((projection) => {
+          for (let i = 0; i < projection.x.length; i++) {
+            ctx.beginPath();
+            ctx.arc(projection.x[i], projection.y[i], 2, 0, Math.PI * 2);
+            ctx.fillStyle = config.projection.color;
+            ctx.fill();
+            ctx.closePath();
+          }
+        });
+      }
+
+      // ----------------- GAME MECHANICS -----------------
+
+      function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        if (state.world === worldState.dragging) {
+          drawSlingshotLine();
+          drawProjection();
+        }
+
+        drawSlingshot();
+        drawBall();
+        drawProjectionHistory();
+      }
+
+      function update(event) {
+        // calculate the angle
+        if (state.world === worldState.dragging) {
+          // calculate tetha, x and y projection in every second
+          // menggunakan rumus Rumus untuk mencari jarak X (horizontal) dan jarak Y (vertikal) pada waktu tertentu (t)
+          // x(t) = x1 + (v * t * cos(θ))
+          // y(t) = y1 + (v * t * sin(θ)) - (0.5 * g * t^2)
+
+          // kalkulasi (theta) = sudut dalam radian
+          state.angle = Math.atan2(
+            state.ball.y - config.ball.initialPosition.y,
+            state.ball.x - config.ball.initialPosition.x
+          );
+
+          // calculate the initial speed
+          state.fly.speed =
+            config.speedMultiplier *
+            10 *
+            Math.sqrt(
+              (state.ball.x - config.ball.initialPosition.x) ** 2 +
+                (state.ball.y - config.ball.initialPosition.y) ** 2
+            );
+
+          // calculate the projection
+          state.projection.x = [];
+          state.projection.y = [];
+
+          // projection mengarah ke arah bola akan di lempar (kebalikand dari arah tarikan)
+          for (let t = 0; t < 50; t += config.projection.gap) {
+            const xProjection =
+              state.ball.x - state.fly.speed * t * Math.cos(state.angle);
+            const yProjection =
+              state.ball.y -
+              state.fly.speed * t * Math.sin(state.angle) +
+              0.5 * (config.gravity * 100) * t ** 2;
+
+            state.projection.x.push(xProjection);
+            state.projection.y.push(yProjection);
+          }
+        }
+
+        if (state.world === worldState.flying) {
+          // run the ball with the same formulas as the projection
+          // x(t) = x1 + (v * t * cos(θ))
+          // y(t) = y1 + (v * t * sin(θ)) - (0.5 * g * t^2)
+
+          const t = (Date.now() - state.fly.startTime) / 1000;
+
+          state.ball.x =
+            state.fly.x - state.fly.speed * t * Math.cos(state.angle);
+          state.ball.y =
+            state.fly.y -
+            state.fly.speed * t * Math.sin(state.angle) +
+            0.5 * (config.gravity * 100) * t ** 2;
+
+          // run timer
+          document.querySelector(".timer").innerText = `Time: ${t.toFixed(2)}s`;
+        }
+
+        // check if the ball is grounded
+        if (state.ball.y + config.ball.radius > canvas.height) {
+          state.world = worldState.grounded;
+          state.ball.y = canvas.height - config.ball.radius;
+        }
+      }
+
+      // ----------------- EVENT HANDLERS -----------------
+
+      function mouseDownHandler(event) {
+        const mouseX = event.clientX - canvas.offsetLeft;
+        const mouseY = event.clientY - canvas.offsetTop;
+
+        if (state.world === worldState.idle) {
+          if (
+            mouseX > state.ball.x - config.ball.radius &&
+            mouseX < state.ball.x + config.ball.radius &&
+            mouseY > state.ball.y - config.ball.radius &&
+            mouseY < state.ball.y + config.ball.radius
+          ) {
+            state.world = worldState.dragging;
+          }
+        }
+
+        if (state.world === worldState.grounded) {
+          state = {
+            ...JSON.parse(JSON.stringify(initialState)),
+            projectionHistory: state.projectionHistory,
+          };
+        }
+      }
+
+      function mouseMoveHandler(event) {
+        const { ball, world } = state;
+
+        if (world === worldState.dragging) {
+          // Update ball position when dragging
+          ball.x = event.clientX - canvas.offsetLeft;
+          ball.y = event.clientY - canvas.offsetTop;
+        }
+      }
+
+      function mouseUpHandler() {
+        if (state.world === worldState.dragging) {
+          state.world = "flying";
+          state.fly.x = state.ball.x;
+          state.fly.y = state.ball.y;
+          state.fly.startTime = Date.now();
+
+          // save the projection history
+          state.projectionHistory.push(
+            JSON.parse(JSON.stringify(state.projection))
+          );
+        }
+      }
+
+      // ----------------- GAME LOOP -----------------
+
+      function gameLoop() {
+        update();
+        draw();
+        requestAnimationFrame(gameLoop);
+      }
+
+      canvas.addEventListener("mousedown", mouseDownHandler);
+      canvas.addEventListener("mousemove", mouseMoveHandler);
+      canvas.addEventListener("mouseup", mouseUpHandler);
+
+      // mobile browser tap
+      canvas.addEventListener("touchstart", mouseDownHandler);
+      canvas.addEventListener("touchmove", (event) => {
+        event.preventDefault();
+        mouseMoveHandler(event.touches[0]);
+      });
+      canvas.addEventListener("touchend", mouseUpHandler);
+
+      gameLoop();
+    </script>
+  </body>
+</html>
